@@ -1,10 +1,14 @@
 """
-Background Job Manager Tool for Agentic Shell Environments.
+Background Job Manager Agent (Agent 5) for Agentic Shell Environments.
 
-This module provides a standalone execution tool designed to be invoked by a
-master LLM agent. It detaches commands from the controlling terminal, redirects
-I/O, tracks processes via background monitoring threads, and issues asynchronous
-alerts upon completion without blocking the main execution thread.
+Domain: Process & CPU Management
+Functionality: Handles shell process detachment, standard output redirection,
+               and asynchronous completion notifications with output previews.
+
+Modular Architecture:
+  - alerts.py: Multi-tier alerts (desktop GUI, /dev/tty + ASCII bell, stderr) with output preview.
+  - job_status.py: Dedicated get_job_status, read_job_logs, and list_background_jobs tools.
+  - schemas.py: JSON function-calling schema definitions for LLM integration.
 """
 
 from __future__ import annotations
@@ -12,91 +16,30 @@ from __future__ import annotations
 import os
 import platform
 import shutil
-import signal
 import subprocess
 import sys
 import threading
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
-import uuid
 
-
-def _send_system_alert(pid: int, command: str, exit_code: int) -> None:
-    """
-    Triggers a system-level asynchronous alert stating whether the process
-    completed successfully or with errors.
-
-    Notification strategy:
-      1. Linux desktop: `notify-send` (if desktop notification daemon is available).
-      2. Linux headless: Write directly to `/dev/tty` (controlling terminal) with ASCII bell.
-      3. Fallback: Write alert message to `sys.stderr`.
-    """
-    if exit_code == 0:
-        status_label = "SUCCESS"
-        status_desc = "finished successfully (exit code 0)"
-        urgency = "normal"
-    elif exit_code < 0:
-        # Process was terminated by a signal on POSIX
-        try:
-            sig_name = signal.Signals(-exit_code).name
-            status_label = f"KILLED ({sig_name})"
-            status_desc = f"terminated by signal {sig_name} (code {exit_code})"
-        except (ValueError, AttributeError):
-            status_label = f"KILLED (signal {-exit_code})"
-            status_desc = f"terminated by signal {-exit_code}"
-        urgency = "critical"
-    else:
-        status_label = f"FAILED ({exit_code})"
-        status_desc = f"finished with errors (exit code {exit_code})"
-        urgency = "critical"
-
-    cmd_preview = (command[:60] + "...") if len(command) > 60 else command
-    alert_title = f"Background Job [{pid}] {status_label}"
-    alert_body = f"Command: {cmd_preview}\nResult: {status_desc}"
-
-    alert_sent = False
-
-    # 1. Desktop GUI Notification (Linux notify-send)
-    if shutil.which("notify-send"):
-        try:
-            subprocess.run(
-                [
-                    "notify-send",
-                    "-u", urgency,
-                    "-a", "Background Job Manager",
-                    alert_title,
-                    alert_body,
-                ],
-                check=False,
-                timeout=5,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            alert_sent = True
-        except Exception:
-            pass
-
-    # 2. Controlling Terminal write for headless Linux environments (/dev/tty)
-    # /dev/tty directly reaches the interactive terminal of the session, even
-    # when stdout/stderr of worker processes are redirected elsewhere.
-    try:
-        with open("/dev/tty", "w", encoding="utf-8") as tty:
-            # \a emits an ASCII bell to audibly/visually notify the operator
-            tty.write(f"\r\n\a[ALERT] {alert_title}: {status_desc} | Command: {cmd_preview}\r\n")
-            tty.flush()
-            alert_sent = True
-    except (OSError, IOError):
-        # /dev/tty is unavailable in non-POSIX environments, daemonized services, or subshells without tty
-        pass
-
-    # 3. Graceful fallback if neither GUI notification nor /dev/tty was dispatched
-    if not alert_sent:
-        try:
-            sys.stderr.write(f"\r\n[ALERT] {alert_title}: {status_desc} | Command: {cmd_preview}\r\n")
-            sys.stderr.flush()
-        except Exception:
-            pass
+# Subsystem imports
+from alerts import extract_log_preview, send_system_alert
+from job_status import (
+    get_job_status,
+    list_background_jobs,
+    read_job_logs,
+    register_job,
+    update_job_completion,
+)
+from schemas import (
+    AGENT_TOOLS_SCHEMA,
+    BACKGROUND_JOB_TOOL_SCHEMA,
+    GET_JOB_STATUS_SCHEMA,
+    LIST_BACKGROUND_JOBS_SCHEMA,
+    READ_JOB_LOGS_SCHEMA,
+)
 
 
 def _monitor_job(
@@ -108,12 +51,15 @@ def _monitor_job(
     """
     Lightweight, non-blocking monitoring routine running inside a daemon thread.
     
-    Waits for process termination, writes a completion record into the log file,
-    and dispatches a system-level asynchronous alert.
+    Waits for process termination, extracts the final output preview from the log file,
+    writes completion metadata, updates job tracking, and dispatches an alert with the preview.
     """
     # Wait for the child process to terminate (blocks only this background thread)
     exit_code = proc.wait()
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Extract immediate output preview for the alert before writing the completion footer
+    output_preview = extract_log_preview(log_path, max_lines=5)
 
     # Append completion metadata to the log file for auditing
     try:
@@ -123,8 +69,16 @@ def _monitor_job(
     except Exception:
         pass
 
-    # Trigger system-level asynchronous alert
-    _send_system_alert(pid=pid, command=command, exit_code=exit_code)
+    # Update in-memory job tracking
+    update_job_completion(pid, exit_code)
+
+    # Trigger system-level asynchronous alert including the output preview
+    send_system_alert(
+        pid=pid,
+        command=command,
+        exit_code=exit_code,
+        output_preview=output_preview,
+    )
 
 
 def run_background_job(command: str, log_file: Optional[str] = None) -> str:
@@ -136,7 +90,7 @@ def run_background_job(command: str, log_file: Optional[str] = None) -> str:
       - Closes stdin via subprocess.DEVNULL (prevents waiting for user input).
       - Redirects stdout and stderr to the specified log file.
       - Returns immediately with PID and log path without blocking the caller.
-      - Spawns a dedicated monitoring thread to alert upon process exit.
+      - Spawns a dedicated monitoring thread to alert with an output preview upon process exit.
 
     Args:
         command: The shell command string to execute in the background.
@@ -203,6 +157,9 @@ def run_background_job(command: str, log_file: Optional[str] = None) -> str:
         # The child process holds its own inherited duplicate handle to the file.
         log_handle.close()
 
+    # Register job into the tracker database
+    register_job(proc.pid, command, resolved_log_path)
+
     # Spawn lightweight, non-blocking monitoring thread
     monitor_thread = threading.Thread(
         target=_monitor_job,
@@ -219,64 +176,70 @@ def run_background_job(command: str, log_file: Optional[str] = None) -> str:
     )
 
 
-# Standard JSON tool schema definition for LLM function calling
-BACKGROUND_JOB_TOOL_SCHEMA: Dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "run_background_job",
-        "description": (
-            "Executes a shell command in the background, completely detached from the current "
-            "terminal session (replicates fork(), setsid(), and nohup). Standard output and standard "
-            "error are redirected to the specified log file. The process does not wait for stdin. "
-            "Returns immediately with the PID and log file location. A background monitoring thread "
-            "tracks the process and triggers a system alert when it finishes."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The shell command string to execute in the background.",
-                },
-                "log_file": {
-                    "type": "string",
-                    "description": (
-                        "Optional file path where stdout and stderr will be redirected. "
-                        "If omitted, a default timestamped log file is automatically created."
-                    ),
-                },
-            },
-            "required": ["command"],
-            "additionalProperties": False,
-        },
-    },
+# ============================================================================
+# LLM TOOL DISPATCHER & REGISTRY
+# ============================================================================
+
+TOOL_REGISTRY = {
+    "run_background_job": run_background_job,
+    "get_job_status": get_job_status,
+    "read_job_logs": read_job_logs,
+    "list_background_jobs": list_background_jobs,
 }
+
+
+def execute_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
+    """
+    Executes a tool selected by the master LLM with its parsed arguments.
+
+    Args:
+        tool_name: Name of the function chosen by the LLM.
+        arguments: Dictionary of keyword arguments parsed by the LLM.
+
+    Returns:
+        String result of the tool invocation.
+    """
+    if tool_name not in TOOL_REGISTRY:
+        raise ValueError(f"Unknown tool '{tool_name}'. Available: {list(TOOL_REGISTRY.keys())}")
+
+    func = TOOL_REGISTRY[tool_name]
+    return str(func(**arguments))
 
 
 if __name__ == "__main__":
     import json
     import time
 
-    print("=== Background Job Manager Tool Schema ===")
-    print(json.dumps(BACKGROUND_JOB_TOOL_SCHEMA, indent=2))
+    print("=== Agent 5 Tools Schemas for Master LLM ===")
+    print(json.dumps(AGENT_TOOLS_SCHEMA, indent=2))
     print("\n=== Test Execution ===")
 
-    # Run a quick background command to demonstrate functionality
+    # Run a test command that produces distinct output lines
     test_cmd = (
         f'"{sys.executable}" -c '
-        '"import time; print(\'Running background task step 1...\'); '
-        'time.sleep(1); print(\'Finished background task step 2.\')"'
+        '"import time; print(\'Step 1: Fetching database records...\'); '
+        'time.sleep(1); print(\'Step 2: Database dump completed with 4200 records.\')"'
         if platform.system() != "Windows"
-        else "echo Running background job step 1... & timeout /t 1 /nobreak >nul & echo Finished background job step 2."
+        else "echo Step 1: Fetching database records... & timeout /t 1 /nobreak >nul & echo Step 2: Database dump completed with 4200 records."
     )
+
     result = run_background_job(test_cmd, log_file="sample_job.log")
     print(f"Tool Output: {result}")
+    
+    # Extract PID
+    pid = int(result.split("PID: ")[1].split(")")[0])
 
-    print("Main thread continuing immediately without blocking...")
-    # Wait briefly for demo purposes so we can observe log completion
+    print("\n[Inspection Tool] Checking status while running:")
+    print(get_job_status(pid, tail_lines=2))
+
+    print("\nWaiting for background execution to complete...")
     time.sleep(2)
 
+    print("\n[Inspection Tool] Checking status after completion:")
+    print(get_job_status(pid, tail_lines=3))
+
+    print("\n[Inspection Tool] Reading job logs:")
+    print(read_job_logs(pid=pid, lines=5))
+
     if Path("sample_job.log").exists():
-        print("\n=== Generated Log Content ===")
-        print(Path("sample_job.log").read_text(encoding="utf-8"))
         Path("sample_job.log").unlink()
