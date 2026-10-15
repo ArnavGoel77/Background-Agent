@@ -12,7 +12,8 @@ A modular execution and monitoring toolkit designed for the master LLM to dispat
 ```
 Background-Agent/
 ├── alerts.py                    # Multi-channel alerting (GUI, /dev/tty + \a, stderr) with log preview
-├── job_status.py                # Process health checks, get_job_status, read_job_logs, list_background_jobs
+├── job_status.py                # Process health checks, get_job_status, stop_background_job, read_job_logs
+├── security.py                  # Security guardrail framework with regex-based destructive command blacklist
 ├── background_job_manager.py    # Process detachment (fork/setsid/nohup), daemon monitoring, dispatcher
 ├── schemas.py                   # LLM Function-Calling schemas (OpenAI/Gemini/Anthropic compatible)
 └── test_background_job_manager.py # Comprehensive unit test suite
@@ -22,21 +23,25 @@ Background-Agent/
 
 ## Key Features
 
-1. **True Detachment (`fork()`, `setsid()`, `nohup`)**:
+1. **Security Guardrails & Command Sanitization**:
+   - Pre-execution validation using compiled regular expressions to reject destructive commands before child process creation.
+   - Blocks recursive root wipes (`rm -rf /`), raw disk formats (`mkfs`, `format`), fork bombs (`:(){ :|:& };:`), and unauthorized permission modifications (`chmod 777 /`).
+2. **True Detachment (`fork()`, `setsid()`, `nohup`)**:
    - Uses `start_new_session=True` (`os.setsid()` on POSIX) to establish a new process group and decouple from the controlling terminal session.
    - Ignores terminal disconnections (`SIGHUP`).
    - Binds `stdin` to `subprocess.DEVNULL` to prevent interactive hangs.
    - Redirects both standard output (`stdout`) and standard error (`stderr`) to a designated log file.
-2. **Instant Non-Blocking Return**:
+3. **Instant Non-Blocking Return**:
    - Immediately yields process metadata (`PID` and `log_file` path) back to the caller in milliseconds.
-3. **Alerts with Output Preview**:
+4. **Alerts with Output Preview**:
    - Background daemon thread automatically captures the trailing lines of the log upon process exit.
    - Dispatches a system alert containing the immediate result preview across:
      - **Linux Desktop**: `notify-send` with urgency levels.
      - **Linux Headless / SSH**: Direct write to `/dev/tty` with an audible ASCII bell (`\a`).
      - **Fallback**: Alert to `sys.stderr`.
-4. **Dedicated LLM Inspection Tools**:
+5. **Dedicated LLM Inspection & Process Control Tools**:
    - `get_job_status`: Queries whether a PID is running, its start/completion times, and recent log output.
+   - `stop_background_job`: Safely terminates or forcefully kills an active background job process.
    - `read_job_logs`: Reads intermediate or final logs by PID or direct log path.
    - `list_background_jobs`: Returns a table of all tracked background jobs.
 
@@ -46,17 +51,21 @@ Background-Agent/
 
 ### 1. `run_background_job(command, log_file=None)`
 - **Parameters**: `command` (str, required), `log_file` (str, optional)
-- Detaches the command, redirects stdout/stderr to disk, starts monitoring, and returns immediately with the PID and log path.
+- Validates command safety against security blacklists, detaches the command, redirects stdout/stderr to disk, starts monitoring, and returns immediately with the PID and log path.
 
 ### 2. `get_job_status(pid, tail_lines=5)`
 - **Parameters**: `pid` (int, required), `tail_lines` (int, optional, default: 5)
 - Returns job status (`RUNNING`, `COMPLETED`, `FAILED`, `TERMINATED`), runtime, and the last few lines of output.
 
-### 3. `read_job_logs(pid=None, log_file=None, lines=20)`
+### 3. `stop_background_job(pid, force=False)`
+- **Parameters**: `pid` (int, required), `force` (bool, optional, default: False)
+- Gracefully terminates (`SIGTERM`) or forcefully kills (`SIGKILL` / `taskkill /F`) an active background process group.
+
+### 4. `read_job_logs(pid=None, log_file=None, lines=20)`
 - **Parameters**: `pid` (int, optional), `log_file` (str, optional), `lines` (int, optional, default: 20)
 - Reads the requested number of log lines (or full log if `lines=0`) for a job.
 
-### 4. `list_background_jobs()`
+### 5. `list_background_jobs()`
 - **Parameters**: None
 - Lists all jobs started and tracked during this session.
 
