@@ -114,13 +114,41 @@ LIST_BACKGROUND_JOBS_SCHEMA: Dict[str, Any] = {
     },
 }
 
+STOP_BACKGROUND_JOB_SCHEMA: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "stop_background_job",
+        "description": (
+            "Terminates an active background job by PID. Supports both graceful "
+            "termination and forced kill."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pid": {
+                    "type": "integer",
+                    "description": "Process ID (PID) of the background job to stop.",
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": "If true, forcefully kills the process group immediately (default: false).",
+                },
+            },
+            "required": ["pid"],
+            "additionalProperties": False,
+        },
+    },
+}
+
 # Master list of all tools exposed by Agent 5
 AGENT_TOOLS_SCHEMA: List[Dict[str, Any]] = [
     RUN_BACKGROUND_JOB_SCHEMA,
     GET_JOB_STATUS_SCHEMA,
     READ_JOB_LOGS_SCHEMA,
     LIST_BACKGROUND_JOBS_SCHEMA,
+    STOP_BACKGROUND_JOB_SCHEMA,
 ]
 
 # Backwards compatible alias
 BACKGROUND_JOB_TOOL_SCHEMA = RUN_BACKGROUND_JOB_SCHEMA
+

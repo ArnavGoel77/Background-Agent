@@ -7,8 +7,9 @@ Functionality: Handles shell process detachment, standard output redirection,
 
 Modular Architecture:
   - alerts.py: Multi-tier alerts (desktop GUI, /dev/tty + ASCII bell, stderr) with output preview.
-  - job_status.py: Dedicated get_job_status, read_job_logs, and list_background_jobs tools.
+  - job_status.py: Dedicated get_job_status, read_job_logs, list_background_jobs, and stop_background_job tools.
   - schemas.py: JSON function-calling schema definitions for LLM integration.
+  - security.py: Security Guardrails with regex command sanitization and destructive command blacklist.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from job_status import (
     list_background_jobs,
     read_job_logs,
     register_job,
+    stop_background_job,
     update_job_completion,
 )
 from schemas import (
@@ -39,7 +41,10 @@ from schemas import (
     GET_JOB_STATUS_SCHEMA,
     LIST_BACKGROUND_JOBS_SCHEMA,
     READ_JOB_LOGS_SCHEMA,
+    STOP_BACKGROUND_JOB_SCHEMA,
 )
+from security import SecurityViolationError, validate_command
+
 
 
 def _monitor_job(
@@ -101,6 +106,9 @@ def run_background_job(command: str, log_file: Optional[str] = None) -> str:
     """
     if not command or not command.strip():
         raise ValueError("The 'command' parameter cannot be empty.")
+
+    # Security Guardrail: intercept and block destructive commands before process creation
+    validate_command(command)
 
     # Resolve destination log file path
     if log_file and log_file.strip():
@@ -185,6 +193,7 @@ TOOL_REGISTRY = {
     "get_job_status": get_job_status,
     "read_job_logs": read_job_logs,
     "list_background_jobs": list_background_jobs,
+    "stop_background_job": stop_background_job,
 }
 
 

@@ -8,7 +8,11 @@ allowing the master LLM to inspect running or completed background jobs and tail
 from __future__ import annotations
 
 import os
+import platform
+import signal
+import subprocess
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -21,7 +25,7 @@ _JOBS: Dict[int, Dict[str, Any]] = {}
 def is_pid_alive(pid: int) -> bool:
     """
     Checks whether a process with the given PID is currently active.
-    Utilizes Linux /proc/[pid] when available, with os.kill(pid, 0) as fallback.
+    Utilizes Linux /proc/[pid] when available, Win32 API on Windows, and os.kill(pid, 0) as fallback.
     """
     if pid <= 0:
         return False
@@ -31,12 +35,30 @@ def is_pid_alive(pid: int) -> bool:
     if proc_path.exists():
         return True
 
-    # 2. Cross-platform signal check (signal 0 verifies existence without killing)
+    # 2. Windows Win32 API check (GetExitCodeProcess)
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            SYNCHRONIZE = 0x00100000
+            h_proc = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid
+            )
+            if not h_proc:
+                return False
+            exit_code = ctypes.c_ulong()
+            ctypes.windll.kernel32.GetExitCodeProcess(h_proc, ctypes.byref(exit_code))
+            ctypes.windll.kernel32.CloseHandle(h_proc)
+            STILL_ACTIVE = 259
+            return exit_code.value == STILL_ACTIVE
+        except Exception:
+            pass
+
+    # 3. Cross-platform fallback check (POSIX signal 0)
     try:
         os.kill(pid, 0)
         return True
     except OSError as err:
-        # errno 1 (EPERM) indicates the process exists but belongs to another user
         return getattr(err, "errno", None) == 1
 
 
@@ -94,7 +116,11 @@ def get_job_status(pid: int, tail_lines: int = 5) -> str:
         cmd = job["command"]
         start_time = job["start_time"]
         end_time = job["end_time"] or ("Still running" if alive else "Unknown")
-        status = "RUNNING" if alive else job["status"]
+        # If the job has already recorded a completion status, respect that status
+        if job.get("exit_code") is not None:
+            status = job["status"]
+        else:
+            status = "RUNNING" if alive else job["status"]
         log_path: Optional[Path] = job["log_path"]
     else:
         # Untracked or external PID
@@ -205,3 +231,70 @@ def list_background_jobs() -> str:
         rows.append(f"{pid:<8} {status:<15} {start:<20} {cmd}")
 
     return "\n".join(rows)
+
+
+def stop_background_job(pid: int, force: bool = False) -> str:
+    """
+    Terminates an active background job process.
+
+    Args:
+        pid: The process ID (PID) of the background job to stop.
+        force: If True, forcefully kills the process (SIGKILL / taskkill /F).
+               If False, attempts graceful termination (SIGTERM) first.
+
+    Returns:
+        Status message detailing the result of the termination attempt.
+    """
+    if pid <= 0:
+        return f"Error: Invalid PID {pid}. PID must be a positive integer."
+
+    if not is_pid_alive(pid):
+        return f"Job with PID {pid} is not currently running."
+
+    is_windows = platform.system() == "Windows"
+    success = False
+    error_msg = ""
+
+    if is_windows:
+        cmd = ["taskkill", "/PID", str(pid), "/T"]
+        if force:
+            cmd.append("/F")
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if res.returncode == 0:
+                success = True
+            else:
+                # Fallback to os.kill
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                    success = True
+                except Exception as ex:
+                    error_msg = res.stderr.strip() or str(ex)
+        except Exception as e:
+            error_msg = str(e)
+    else:
+        sig = signal.SIGKILL if force else signal.SIGTERM
+        try:
+            pgid = os.getpgid(pid)
+            os.killpg(pgid, sig)
+            success = True
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                os.kill(pid, sig)
+                success = True
+            except Exception as e:
+                error_msg = str(e)
+
+    time.sleep(0.1)
+
+    with _LOCK:
+        if pid in _JOBS:
+            _JOBS[pid]["status"] = "KILLED (Force)" if force else "STOPPED"
+            _JOBS[pid]["end_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if success or not is_pid_alive(pid):
+        mode_str = "forcefully terminated" if force else "terminated"
+        return f"Successfully {mode_str} background job with PID {pid}."
+    else:
+        return f"Failed to stop job with PID {pid}: {error_msg}"
+
