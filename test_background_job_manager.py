@@ -10,6 +10,7 @@ Verifies:
   - execute_tool LLM dispatcher.
 """
 
+import asyncio
 import os
 import pathlib
 import platform
@@ -29,6 +30,7 @@ from background_job_manager import (
     stop_background_job,
 )
 from job_status import is_pid_alive
+from mcp_server import mcp as mcp_instance
 from security import SecurityViolationError, check_command_safety, validate_command
 
 
@@ -200,6 +202,54 @@ class TestBackgroundJobManager(unittest.TestCase):
         with self.assertRaises(ValueError):
             execute_tool("unknown_tool", {})
 
+    def test_mcp_server_registration(self):
+        """Verify the MCP Server registers all 5 background agent tools."""
+        registered_tool_names = [t.name for t in mcp_instance._tool_manager.list_tools()]
+        expected_tools = [
+            "run_background_job",
+            "get_job_status",
+            "stop_background_job",
+            "read_job_logs",
+            "list_background_jobs",
+        ]
+        for tool_name in expected_tools:
+            self.assertIn(tool_name, registered_tool_names)
+
+    def test_mcp_server_tool_call(self):
+        """Verify calling background agent tools via the MCP Server async interface."""
+        async def run_mcp_test():
+            # 1. Run background job via MCP
+            res = await mcp_instance.call_tool(
+                "run_background_job",
+                {"command": "echo MCP Execution Test", "log_file": str(self.test_log)},
+            )
+            # FastMCP returns tuple: (content_list, extra_dict)
+            text_out = res[0][0].text
+            self.assertIn("PID:", text_out)
+
+            # 2. Check list_background_jobs via MCP
+            list_res = await mcp_instance.call_tool("list_background_jobs", {})
+            list_text = list_res[0][0].text
+            self.assertIn("MCP Execution Test", list_text)
+
+        asyncio.run(run_mcp_test())
+
+    def test_mcp_server_security_guardrail(self):
+        """Verify MCP Server intercepts destructive commands and raises ToolError wrapping SecurityViolationError."""
+        from mcp.server.fastmcp.exceptions import ToolError
+
+        async def run_security_test():
+            with self.assertRaises(ToolError) as ctx:
+                await mcp_instance.call_tool(
+                    "run_background_job",
+                    {"command": "rm -rf /", "log_file": str(self.test_log)},
+                )
+            self.assertIn("Security Guardrail", str(ctx.exception))
+            self.assertIsInstance(ctx.exception.__cause__, SecurityViolationError)
+
+        asyncio.run(run_security_test())
+
 
 if __name__ == "__main__":
     unittest.main()
+

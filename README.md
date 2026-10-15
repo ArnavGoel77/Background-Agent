@@ -15,8 +15,10 @@ Background-Agent/
 ├── job_status.py                # Process health checks, get_job_status, stop_background_job, read_job_logs
 ├── security.py                  # Security guardrail framework with regex-based destructive command blacklist
 ├── background_job_manager.py    # Process detachment (fork/setsid/nohup), daemon monitoring, dispatcher
+├── mcp_server.py                # Model Context Protocol (FastMCP) server over stdio transport
 ├── schemas.py                   # LLM Function-Calling schemas (OpenAI/Gemini/Anthropic compatible)
-└── test_background_job_manager.py # Comprehensive unit test suite
+├── test_background_job_manager.py # Comprehensive unit test suite (13/13 tests passing)
+└── REVIEW_2_REPORT.md           # OS Lab Review 2 Comprehensive Technical Report
 ```
 
 ---
@@ -89,3 +91,36 @@ status = execute_tool("get_job_status", {"pid": 12345, "tail_lines": 5})
 # 3. Master LLM reads detailed logs:
 logs = execute_tool("read_job_logs", {"pid": 12345, "lines": 50})
 ```
+
+---
+
+## Model Context Protocol (MCP) Server
+
+Agent 5 is wrapped as an **MCP Server** via `mcp_server.py` using `FastMCP`. The Parent Shell connects to Agent 5 over standard I/O (`stdio` JSON-RPC transport).
+
+### Running the MCP Server
+```bash
+python mcp_server.py
+# or
+python -m mcp_server
+```
+
+### Parent Shell MCP Client Configuration
+Add Agent 5 to your Parent Shell's MCP client configuration file (e.g., `mcp_config.json`):
+```json
+{
+  "mcpServers": {
+    "background-job-manager": {
+      "command": "python",
+      "args": ["-m", "mcp_server"],
+      "cwd": "C:/Users/Shobit/Background-Agent"
+    }
+  }
+}
+```
+
+---
+
+## Documentation
+- See **[REVIEW_2_REPORT.md](REVIEW_2_REPORT.md)** for the complete Operating Systems (BCSE303L) Review 2 report, system architecture diagrams, security policy specifications, and benchmarking data.
+
