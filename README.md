@@ -1,4 +1,4 @@
-# NL-to-CLI AI Shell — Background Process & Job Management Subsystem (Agent 5)
+# Background Process & Job Management Subsystem (Agent 5)
 
 <p align="center">
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.10+-3776AB.svg?style=flat&logo=python&logoColor=white" alt="Python 3.10+"/></a>
@@ -16,7 +16,6 @@
 | :--- | :--- |
 | **Domain** | Operating Systems — Process & CPU Management |
 | **Course** | Operating Systems Lab (`BCSE303L`) |
-| **Academic Authors** | • **Arnav Goel** (`24BCT0189`)<br/>• **Shobit Khanna** (`24BCT0187`) |
 | **Architecture** | Parent Shell (Master Reasoning LLM) $\leftrightarrow$ Agent 5 (Deterministic OS Execution Engine) |
 | **Protocol** | Model Context Protocol (MCP) over `stdio` (JSON-RPC 2.0) |
 
@@ -167,4 +166,3 @@ python -c "from background_job_manager import run_background_job; run_background
 
 ## 8. License & Academic Integrity
 Developed as part of the **BCSE303L — Operating Systems Lab** project submission.  
-Authored by **Arnav Goel** (`24BCT0189`) and **Shobit Khanna** (`24BCT0187`).
