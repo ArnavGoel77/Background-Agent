@@ -23,7 +23,7 @@
 ---
 
 ## Table of Contents
-- [1. System Architecture & Flow Diagram](#1-system-architecture--flow-diagram)
+- [1. System Architecture](#1-system-architecture)
 - [2. The 5-Stage User-to-Shell Loop](#2-the-5-stage-user-to-shell-loop)
 - [3. Key Operating System Features](#3-key-operating-system-features)
 - [4. MCP Tools Exposed to the Master LLM](#4-mcp-tools-exposed-to-the-master-llm)
@@ -34,19 +34,13 @@
 
 ---
 
-## 1. System Architecture & Flow Diagram
+## 1. System Architecture
 
 The **Background Job Manager (Agent 5)** provides deterministic, high-speed operating system process detachment, lifecycle tracking, real-time logging, security guardrails, and asynchronous completion alerts to the central **NL-to-CLI AI Shell**.
 
 > [!IMPORTANT]
 > **Architectural Constraint — Zero Internal LLM:**  
 > In strict accordance with system design principles, **Agent 5 contains NO internal LLM**. The master reasoning LLM resides exclusively in the Parent Shell, while Agent 5 acts as a high-performance execution engine exposed through Anthropic's open **Model Context Protocol (MCP)** over `stdio`.
-
-### End-to-End Architecture Flow Diagram
-
-<p align="center">
-  <img src="architecture_diagram.png" alt="System Architecture and Multi-Agent Interaction Workflow" width="900"/>
-</p>
 
 ---
 
@@ -140,7 +134,6 @@ Background-Agent/
 ├── schemas.py                     # JSON schemas matching OpenAI/Anthropic/Gemini function calling specs
 ├── security.py                    # Pre-execution regex guardrail engine blocking 9 destructive command variants
 ├── test_background_job_manager.py   # 13-category automated unit test suite
-├── architecture_diagram.png       # Publication-grade system architecture and interaction diagram
 └── README.md                      # Project documentation & master cheat-sheet
 ```
 
