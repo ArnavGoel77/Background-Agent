@@ -67,7 +67,7 @@ def send_system_alert(
     Notification cascade:
       1. Linux desktop: `notify-send` (if desktop notification daemon is available).
       2. Linux headless/SSH: Direct write to `/dev/tty` with an ASCII bell (`\\a`).
-      3. Fallback: Write alert message to `sys.stderr`.
+      3. Fallback: Write alert message to `sys.stderr` and emit system chime.
     """
     if exit_code == 0:
         status_label = "SUCCESS"
@@ -128,8 +128,15 @@ def send_system_alert(
 
     # 3. Graceful fallback if neither GUI notification nor /dev/tty was dispatched
     if not alert_sent:
+        # On Windows, trigger system audible notification
+        if platform.system() == "Windows":
+            try:
+                import winsound
+                winsound.MessageBeep()
+            except Exception:
+                pass
         try:
-            sys.stderr.write(f"\r\n[ALERT] {alert_title}: {status_desc}\r\nCommand: {cmd_preview}{preview_section}\r\n")
+            sys.stderr.write(f"\r\n\a[ALERT] {alert_title}: {status_desc}\r\nCommand: {cmd_preview}{preview_section}\r\n")
             sys.stderr.flush()
         except Exception:
             pass
