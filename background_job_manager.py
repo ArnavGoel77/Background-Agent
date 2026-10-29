@@ -139,9 +139,13 @@ def run_background_job(command: str, log_file: Optional[str] = None) -> str:
         }
 
         if is_windows:
-            # Windows process detachment flags
+            # Windows process detachment flags:
+            # CREATE_NEW_PROCESS_GROUP: Independent process group for clean tree kill
+            # CREATE_NO_WINDOW: Runs completely headless without popping up a console window
             creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
-            if hasattr(subprocess, "DETACHED_PROCESS"):
+            if hasattr(subprocess, "CREATE_NO_WINDOW"):
+                creationflags |= subprocess.CREATE_NO_WINDOW
+            elif hasattr(subprocess, "DETACHED_PROCESS"):
                 creationflags |= subprocess.DETACHED_PROCESS
             popen_kwargs["creationflags"] = creationflags
         else:

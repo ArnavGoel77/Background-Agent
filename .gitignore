@@ -3,3 +3,7 @@ __pycache__/
 *.log
 .logs/
 *.docx
+create_review_docs.py
+generate_diagram.py
+*.png
+*.pdf
