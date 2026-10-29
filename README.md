@@ -1,15 +1,36 @@
 # NL-to-CLI AI Shell — Background Process & Job Management Subsystem (Agent 5)
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Protocol](https://img.shields.io/badge/protocol-Model_Context_Protocol_(MCP)-green.svg)](https://modelcontextprotocol.io/)
-[![Tests](https://img.shields.io/badge/tests-13%2F13%20passed-brightgreen.svg)](test_background_job_manager.py)
-[![OS Compatibility](https://img.shields.io/badge/OS-Linux%20%7C%20Windows-lightgrey.svg)](README.md)
+<p align="center">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.10+-3776AB.svg?style=flat&logo=python&logoColor=white" alt="Python 3.10+"/></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/Protocol-Model_Context_Protocol_(MCP)-green.svg?style=flat" alt="Model Context Protocol"/></a>
+  <a href="test_background_job_manager.py"><img src="https://img.shields.io/badge/Tests-13%2F13%20Passed%20(100%25)-brightgreen.svg?style=flat&logo=pytest&logoColor=white" alt="Test Status"/></a>
+  <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-lightgrey.svg?style=flat" alt="OS Compatibility"/>
+  <img src="https://img.shields.io/badge/Course-BCSE303L%20OS%20Lab-orange.svg?style=flat" alt="Course"/>
+</p>
 
-**Domain:** Operating Systems — Process & CPU Management  
-**Course:** Operating Systems Lab (BCSE303L)  
-**Authors:**  
-- **Arnav Goel** — `24BCT0189`  
-- **Shobit Khanna** — `24BCT0187`  
+---
+
+### Project Metadata
+
+| Attribute | Details |
+| :--- | :--- |
+| **Domain** | Operating Systems — Process & CPU Management |
+| **Course** | Operating Systems Lab (`BCSE303L`) |
+| **Academic Authors** | • **Arnav Goel** (`24BCT0189`)<br/>• **Shobit Khanna** (`24BCT0187`) |
+| **Architecture** | Parent Shell (Master Reasoning LLM) $\leftrightarrow$ Agent 5 (Deterministic OS Execution Engine) |
+| **Protocol** | Model Context Protocol (MCP) over `stdio` (JSON-RPC 2.0) |
+
+---
+
+## Table of Contents
+- [1. System Architecture & Flow Diagram](#1-system-architecture--flow-diagram)
+- [2. The 5-Stage User-to-Shell Loop](#2-the-5-stage-user-to-shell-loop)
+- [3. Key Operating System Features](#3-key-operating-system-features)
+- [4. MCP Tools Exposed to the Master LLM](#4-mcp-tools-exposed-to-the-master-llm)
+- [5. Empirical Performance Benchmarks](#5-empirical-performance-benchmarks)
+- [6. Directory Structure](#6-directory-structure)
+- [7. How to Run & Verify](#7-how-to-run--verify)
+- [8. License & Academic Integrity](#8-license--academic-integrity)
 
 ---
 
@@ -17,10 +38,15 @@
 
 The **Background Job Manager (Agent 5)** provides deterministic, high-speed operating system process detachment, lifecycle tracking, real-time logging, security guardrails, and asynchronous completion alerts to the central **NL-to-CLI AI Shell**.
 
-In strict accordance with system design principles, **Agent 5 contains NO internal LLM**. The master reasoning LLM resides exclusively in the Parent Shell, while Agent 5 acts as a high-performance execution engine exposed through Anthropic's open **Model Context Protocol (MCP)** over `stdio`.
+> [!IMPORTANT]
+> **Architectural Constraint — Zero Internal LLM:**  
+> In strict accordance with system design principles, **Agent 5 contains NO internal LLM**. The master reasoning LLM resides exclusively in the Parent Shell, while Agent 5 acts as a high-performance execution engine exposed through Anthropic's open **Model Context Protocol (MCP)** over `stdio`.
 
 ### End-to-End Architecture Flow Diagram
-![System Architecture and Multi-Agent Interaction Workflow](architecture_diagram.png)
+
+<p align="center">
+  <img src="architecture_diagram.png" alt="System Architecture and Multi-Agent Interaction Workflow" width="900"/>
+</p>
 
 ---
 
@@ -42,27 +68,27 @@ flowchart TD
 ## 3. Key Operating System Features
 
 ### 1. True Process Session Detachment
-- **Linux / POSIX**: Uses `start_new_session=True` (`os.setsid()`) to spawn the child process as the leader of a brand-new session and process group. Decouples from the controlling terminal, making the job **immune to `SIGHUP`** (closing the terminal will not terminate the process).
-- **Windows**: Uses `subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW` to detach the process tree and run completely headless without opening unwanted terminal windows.
+* **Linux / POSIX**: Uses `start_new_session=True` (`os.setsid()`) to spawn the child process as the leader of a brand-new session and process group. Decouples from the controlling terminal, making the job **immune to `SIGHUP`** (closing the terminal will not terminate the process).
+* **Windows**: Uses `subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW` to detach the process tree and run completely headless without opening unwanted terminal windows.
 
 ### 2. Pre-Execution Security Guardrails (`security.py`)
 Intercepts destructive and runaway commands **before any subshell or process is spawned** in under **0.4 milliseconds**, raising a `SecurityViolationError`:
-- **Root Filesystem Wipes**: `rm -rf /`, `rm -rf /*`, `~`, `.`
-- **Bypass Flags**: `--no-preserve-root`
-- **Fork Bombs**: `:(){ :|:& };:` (prevents PID exhaustion)
-- **Drive Formatting**: `mkfs.*`, `fdisk`, `format C:`
-- **Raw Disk Overwrite**: `dd if=... of=/dev/sd...`
-- **System Auth Tampering**: `> /etc/shadow`, `>> /etc/passwd`, `> /etc/sudoers`
-- **Unrestricted Permissions**: `chmod 777 /`, `chmod -R 777 /etc`
+* **Root Filesystem Wipes**: `rm -rf /`, `rm -rf /*`, `~`, `.`
+* **Bypass Flags**: `--no-preserve-root`
+* **Fork Bombs**: `:(){ :|:& };:` (prevents PID exhaustion)
+* **Drive Formatting**: `mkfs.*`, `fdisk`, `format C:`
+* **Raw Disk Overwrite**: `dd if=... of=/dev/sd...`
+* **System Auth Tampering**: `> /etc/shadow`, `>> /etc/passwd`, `> /etc/sudoers`
+* **Unrestricted Permissions**: `chmod 777 /`, `chmod -R 777 /etc`
 
 ### 3. Stdin Deadlock Prevention
-- Commands expecting interactive keyboard input (e.g. `sudo` prompts) can hang background subshells indefinitely.
-- Agent 5 binds `stdin=subprocess.DEVNULL`, forcing interactive tools to fail gracefully rather than locking system resources.
+* Commands expecting interactive keyboard input (e.g. `sudo` prompts) can hang background subshells indefinitely.
+* Agent 5 binds `stdin=subprocess.DEVNULL`, forcing interactive tools to fail gracefully rather than locking system resources.
 
 ### 4. Zero Token & Zero CPU Background Monitoring
-- A background daemon thread (`_monitor_job`) sleeps on non-blocking kernel wait events (`proc.wait()`).
-- Consumes **0 AI tokens** and **0.0% CPU** while the task runs.
-- Resident memory footprint (RSS) stays under **18 MB**.
+* A background daemon thread (`_monitor_job`) sleeps on non-blocking kernel wait events (`proc.wait()`).
+* Consumes **0 AI tokens** and **0.0% CPU** while the task runs.
+* Resident memory footprint (RSS) stays under **18 MB**.
 
 ### 5. Multi-Tier Asynchronous Alerting (`alerts.py`)
 Upon process exit, Agent 5 extracts the trailing 5 lines of output directly from the log file and dispatches:
@@ -91,15 +117,15 @@ Agent 5 registers 5 standardized tools with the FastMCP server:
 Quantitative benchmarks collected across 100 test iterations:
 
 | Metric / Parameter | Target Threshold | Measured Result (Agent 5) | Status |
-| :--- | :--- | :--- | :--- |
-| **Process Detachment Dispatch Latency** | `< 0.250 seconds` | **0.082 seconds** (mean) | **PASSED** (67.2% safety margin) |
-| **Pre-Execution Guardrail Overhead** | `< 5.0 milliseconds` | **0.38 milliseconds** | **PASSED** |
-| **MCP JSON-RPC Stdio Roundtrip Latency** | `< 10.0 milliseconds` | **1.8 milliseconds** | **PASSED** |
-| **Process Group Termination Latency** | `< 50.0 milliseconds` | **12.4 ms** (SIGTERM) / **4.1 ms** (SIGKILL) | **PASSED** |
-| **Log Tail Streaming Latency** | `< 10.0 milliseconds` | **1.1 milliseconds** (reverse seek) | **PASSED** |
-| **Security Interception Rate (9 attacks)** | `100% True Positive` | **100% Blocked** (0 false positives) | **PASSED** |
-| **Terminal Disconnect (`SIGHUP`) Resilience** | `100% Survival` | **100% Survival** (true session isolation) | **PASSED** |
-| **Automated Test Pass Rate** | `100% (13 tests)` | **13 / 13 tests PASSED** in **4.58s** | **PASSED** |
+| :--- | :--- | :--- | :---: |
+| **Process Detachment Dispatch Latency** | `< 0.250 seconds` | **0.082 seconds** (mean) | ✅ **PASSED** (67.2% safety margin) |
+| **Pre-Execution Guardrail Overhead** | `< 5.0 milliseconds` | **0.38 milliseconds** | ✅ **PASSED** |
+| **MCP JSON-RPC Stdio Roundtrip Latency** | `< 10.0 milliseconds` | **1.8 milliseconds** | ✅ **PASSED** |
+| **Process Group Termination Latency** | `< 50.0 milliseconds` | **12.4 ms** (SIGTERM) / **4.1 ms** (SIGKILL) | ✅ **PASSED** |
+| **Log Tail Streaming Latency** | `< 10.0 milliseconds` | **1.1 milliseconds** (reverse seek) | ✅ **PASSED** |
+| **Security Interception Rate (9 attacks)** | `100% True Positive` | **100% Blocked** (0 false positives) | ✅ **PASSED** |
+| **Terminal Disconnect (`SIGHUP`) Resilience** | `100% Survival` | **100% Survival** (true session isolation) | ✅ **PASSED** |
+| **Automated Test Pass Rate** | `100% (13 tests)` | **13 / 13 tests PASSED** in **4.58s** | ✅ **PASSED** |
 
 ---
 
@@ -107,16 +133,16 @@ Quantitative benchmarks collected across 100 test iterations:
 
 ```
 Background-Agent/
-├── alerts.py                    # Multi-tier alerting (notify-send, /dev/tty + \a, stderr chime)
-├── background_job_manager.py    # Process detachment (setsid/process groups), daemon monitoring, dispatcher
-├── job_status.py                # Liveness verification, get_job_status, stop_background_job, read_job_logs
-├── mcp_server.py                # FastMCP server over stdio transport exposing all 5 tools
-├── schemas.py                   # JSON schemas matching OpenAI/Anthropic/Gemini function calling specs
-├── security.py                  # Pre-execution regex guardrail engine blocking 9 destructive command variants
-├── test_background_job_manager.py # 13-category automated unit test suite
-├── architecture_diagram.png     # Publication-grade system architecture and interaction diagram
-├── REVIEW_2_REPORT.md           # Review 2 technical specification report
-└── README.md                    # Project documentation & master cheat-sheet
+├── alerts.py                      # Multi-tier alerting (notify-send, /dev/tty + \a, stderr chime)
+├── background_job_manager.py      # Process detachment (setsid/process groups), daemon monitoring, dispatcher
+├── job_status.py                  # Liveness verification, get_job_status, stop_background_job, read_job_logs
+├── mcp_server.py                  # FastMCP server over stdio transport exposing all 5 tools
+├── schemas.py                     # JSON schemas matching OpenAI/Anthropic/Gemini function calling specs
+├── security.py                    # Pre-execution regex guardrail engine blocking 9 destructive command variants
+├── test_background_job_manager.py   # 13-category automated unit test suite
+├── architecture_diagram.png       # Publication-grade system architecture and interaction diagram
+├── REVIEW_2_REPORT.md             # Review 2 technical specification report
+└── README.md                      # Project documentation & master cheat-sheet
 ```
 
 ---
@@ -127,7 +153,7 @@ Background-Agent/
 ```bash
 python -m unittest test_background_job_manager.py
 ```
-*Output: `Ran 13 tests in 4.58s ... OK (100% pass rate)`*
+> **Expected Output:** `Ran 13 tests in 4.58s ... OK (100% pass rate)`
 
 ### 2. Verify FastMCP Tool Registration
 ```bash
@@ -143,10 +169,10 @@ python -c "from background_job_manager import run_background_job; print(run_back
 ```bash
 python -c "from background_job_manager import run_background_job; run_background_job('rm -rf /')"
 ```
-*Output: `SecurityViolationError: Command 'rm -rf /' matches blocked pattern 'ROOT_FILESYSTEM_DELETION'`*
+> **Expected Output:** `SecurityViolationError: Command 'rm -rf /' matches blocked pattern 'ROOT_FILESYSTEM_DELETION'`
 
 ---
 
 ## 8. License & Academic Integrity
-Developed as part of the **BCSE303L — Operating Systems Lab** project submission.
-Authored by **Arnav Goel (24BCT0189)** and **Shobit Khanna (24BCT0187)**.
+Developed as part of the **BCSE303L — Operating Systems Lab** project submission.  
+Authored by **Arnav Goel** (`24BCT0189`) and **Shobit Khanna** (`24BCT0187`).
